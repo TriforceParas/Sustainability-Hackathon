@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>User Registration and Login</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <button id="loginBtn">Login</button>
+            <button id="registerBtn">Register</button>
+        </div>
+        
+        <div id="message"></div>
+
+        <!-- Login Modal -->
+        <div id="loginModal" class="modal">
+            <div class="modal-content">
+                <span class="close" id="closeLogin">&times;</span>
+                <h1>Login</h1>
+                <form id="loginForm">
+                    <input type="text" name="username_or_email" placeholder="Username or Email" required>
+                    <input type="password" name="password" placeholder="Password" required>
+                    <button type="submit">Login</button>
+                    <p><a href="#" id="resetPasswordLink">Reset Password</a></p>
+                </form>
+            </div>
+        </div>
+
+        <!-- Register Modal -->
+        <div id="registerModal" class="modal">
+            <div class="modal-content">
+                <span class="close" id="closeRegister">&times;</span>
+                <h1>Register</h1>
+                <form id="registrationForm">
+                    <input type="text" name="first_name" placeholder="First Name" required>
+                    <input type="text" name="last_name" placeholder="Last Name" required>
+                    <input type="email" name="email" placeholder="Email" required>
+                    <input type="text" name="phone_no" placeholder="Phone Number" required>
+                    <select name="gender" required>
+                        <option value="">Select Gender</option>
+                        <option value="1">Male</option>
+                        <option value="2">Female</option>
+                        <option value="3">Other</option>
+                    </select>
+                    <input type="text" name="user_name" placeholder="Username" required>
+                    <input type="password" name="password" placeholder="Password" required>
+                    <button type="submit">Register</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- OTP Verification Modal -->
+        <div id="otpModal" class="modal">
+            <div class="modal-content">
+                <span class="close" id="closeOtp">&times;</span>
+                <h1>Verify OTP</h1>
+                <form id="otpVerificationForm">
+                    <input type="email" name="email" id="otpEmail" placeholder="Email" required>
+                    <input type="text" name="otp" placeholder="OTP" required>
+                    <button type="submit">Verify OTP</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Password Reset Modal -->
+        <div id="passwordResetModal" class="modal">
+            <div class="modal-content">
+                <span class="close" id="closePasswordReset">&times;</span>
+                <h1>Reset Password</h1>
+                <form id="passwordResetForm">
+                    <input type="email" name="email" id="resetEmail" placeholder="Email" required>
+                    <button type="submit">Request Password Reset</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Confirm Password Reset Modal -->
+        <div id="confirmPasswordResetModal" class="modal">
+            <div class="modal-content">
+                <span class="close" id="closeConfirmReset">&times;</span>
+                <h1>Confirm Password Reset</h1>
+                <form id="confirmPasswordResetForm">
+                    <input type="email" name="email" id="confirmResetEmail" placeholder="Email" required>
+                    <input type="text" name="otp" placeholder="OTP" required>
+                    <input type="password" name="new_password" placeholder="New Password" required>
+                    <input type="password" name="confirm_password" placeholder="Confirm Password" required>
+                    <button type="submit">Reset Password</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
