@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+        }
+        .chat-container {
+            max-width: 600px;
+            margin: 50px auto;
+            background: white;
+            border-radius: 10px;
+            padding: 10px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        .messages {
+            max-height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .message {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        .message.user .bubble {
+            background-color: #007bff;
+            color: white;
+            margin-left: auto;
+        }
+        .message.bot .bubble {
+            background-color: #eaeaea;
+            color: black;
+            margin-right: auto;
+        }
+        .bubble {
+            padding: 10px;
+            border-radius: 20px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        .input-container {
+            display: flex;
+            margin-top: 10px;
+        }
+        .input-container input {
+            flex-grow: 1;
+            padding: 10px;
+            border-radius: 20px;
+            border: 1px solid #ccc;
+        }
+        .input-container button {
+            padding: 10px 20px;
+            border: none;
+            background-color: #007bff;
+            color: white;
+            border-radius: 20px;
+            margin-left: 10px;
+            cursor: pointer;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script> <!-- Include marked.js -->
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="messages" id="chatBox">
+        <!-- Chat messages will appear here -->
+    </div>
+    <div class="input-container">
+        <input type="text" id="userInput" placeholder="Type a message...">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+</div>
+
+<script>
+    function appendMessage(message, sender) {
+        const chatBox = document.getElementById('chatBox');
+        const messageElement = document.createElement('div');
+        messageElement.classList.add('message', sender);
+
+        const bubble = document.createElement('div');
+        bubble.classList.add('bubble');
+
+        // If sender is bot, parse the message for formatting
+        if (sender === 'bot') {
+            bubble.innerHTML = marked.parse(message); // Parse the markdown syntax
+        } else {
+            bubble.textContent = message; // Plain text for user input
+        }
+
+        messageElement.appendChild(bubble);
+        chatBox.appendChild(messageElement);
+
+        chatBox.scrollTop = chatBox.scrollHeight; // Auto scroll to bottom
+    }
+
+    function sendMessage() {
+        const userInput = document.getElementById('userInput').value;
+        if (userInput.trim() === '') return;
+
+        appendMessage(userInput, 'user');  // Append user message
+
+        // Send the message to the backend Flask app
+        fetch('http://localhost:5000/chat_bot', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ user_input: userInput }),
+        })
+        .then(response => response.json())
+        .then(data => {
+            appendMessage(data.chat_response, 'bot');  // Append bot response (with formatting)
+        })
+        .catch(error => console.error('Error:', error));
+
+        document.getElementById('userInput').value = '';  // Clear input field
+    }
+</script>
+
+</body>
+</html>

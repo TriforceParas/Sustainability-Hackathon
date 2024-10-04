@@ -1,12 +1,15 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from datetime import datetime, timedelta
+import requests
+import os
+from apscheduler.schedulers.background import BackgroundScheduler
 from flask_cors import CORS
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
-import os
 import random
 import string
-from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -14,29 +17,29 @@ import google.generativeai as genai
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
 
-# Configuration
 DB_USERNAME = os.getenv('DB_USERNAME')
 DB_PASSWORD = os.getenv('DB_PASSWORD')
 DB_HOST = os.getenv('DB_HOST')
 DB_NAME = os.getenv('DB_NAME')
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY')
 SENDGRID_FROM_EMAIL = os.getenv('SENDGRID_FROM_EMAIL')
-GOOGLE_AI_API_KEY = os.getenv('GOOGLE_AI_API_KEY')
 
-# SQLAlchemy Configuration
+# Configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = f'mysql://{DB_USERNAME}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY')
+app.config['JWT_SECRET_KEY'] = 'ThisIsTopLevelSecret'  # Change in production
 
+# Global Forest Watch API configuration
+GFW_API_KEY = os.environ['GFW_API_KEY']
+GFW_API_BASE_URL = 'https://data-api.globalforestwatch.org/dataset/gfw_integrated_alerts'
+
+# Initialize extensions
 db = SQLAlchemy(app)
+jwt = JWTManager(app)
+scheduler = BackgroundScheduler()
 
-#Chat Bot Confuguration
-genai.configure(api_key=GOOGLE_AI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
-
-# Models
+# Database Models
 class User(db.Model):
     __tablename__ = 'users'
     user_id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -51,6 +54,23 @@ class User(db.Model):
     is_del = db.Column(db.Boolean, default=False)
     is_verified = db.Column(db.Boolean, default=False)
 
+class Tree(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    latitude = db.Column(db.Float, nullable=False)
+    longitude = db.Column(db.Float, nullable=False)
+    species = db.Column(db.String(100))
+    planting_date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.user_id'), nullable=False)
+
+class DeforestationAlert(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    latitude = db.Column(db.Float, nullable=False)
+    longitude = db.Column(db.Float, nullable=False)
+    alert_date = db.Column(db.DateTime, nullable=False)
+    confidence = db.Column(db.String(50))
+    alert_type = db.Column(db.String(50))
+    gfw_id = db.Column(db.String(100), unique=True)
+
 class OTP(db.Model):
     __tablename__ = 'otps'
     id = db.Column(db.Integer, primary_key=True, autoincrement=True)
@@ -62,7 +82,33 @@ class OTP(db.Model):
 temporary_storage = {}
 reset_storage = {}  # Temporary storage for password reset requests
 
-# Helper functions
+# GFW API Integration
+def fetch_gfw_alerts():
+    headers = {
+        'Authorization': f'Bearer {GFW_API_KEY}',
+        'Content-Type': 'application/json'
+    }
+    
+    # Get alerts for the last 30 days
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=30)
+    
+    params = {
+        'start_date': start_date.strftime('%Y-%m-%d'),
+        'end_date': end_date.strftime('%Y-%m-%d'),
+        'format': 'json'
+    }
+    
+    try:
+        response = requests.get(f'{GFW_API_BASE_URL}/latest', headers=headers, params=params)
+        response.raise_for_status()
+        print("Fetched GFW Alerts:", response.json())  # Log the fetched alerts
+        return response.json()
+    except requests.RequestException as e:
+        print(f"Error fetching GFW data: {e}")
+        return None
+
+
 def generate_otp():
     return ''.join(random.choices(string.digits, k=6))
 
@@ -81,6 +127,26 @@ def send_otp_email(email, otp):
     except Exception as e:
         print(e)
         return False
+
+def process_gfw_alerts(alerts_data):
+    if not alerts_data:
+        return
+    
+    for alert in alerts_data.get('data', []):
+        print("Processing alert:", alert)  # Log each alert being processed
+        if not DeforestationAlert.query.filter_by(gfw_id=alert['id']).first():
+            new_alert = DeforestationAlert(
+                latitude=alert['attributes']['latitude'],
+                longitude=alert['attributes']['longitude'],
+                alert_date=datetime.strptime(alert['attributes']['date'], '%Y-%m-%d'),
+                confidence=alert['attributes'].get('confidence', 'unknown'),
+                alert_type=alert['attributes'].get('alert_type', 'unknown'),
+                gfw_id=alert['id']
+            )
+            db.session.add(new_alert)
+    
+    db.session.commit()
+
 
 # Routes
 @app.route('/register', methods=['POST'])
@@ -247,14 +313,78 @@ def reset_password():
 
     return jsonify({'message': 'Password has been reset successfully.'}), 200
 
-@app.route('/chat_bot', methods=['POST'])
-def chat_bot():
-    data = request.json
-    user_input = data.get('user_input')
-    response = model.generate_content(user_input)
-    return jsonify({'chat_response': response.text.strip()}), 200
+@app.route('/deforestation-alerts', methods=['GET'])
+def get_deforestation_alerts():
+    # Parameters for filtering
+    days = request.args.get('days', 30, type=int)
+    lat = request.args.get('latitude', type=float)
+    lon = request.args.get('longitude', type=float)
+    radius = request.args.get('radius', 50, type=float)  # radius in kilometers
+    
+    print(f"Querying alerts for Latitude: {lat}, Longitude: {lon}, Days: {days}, Radius: {radius}")  # Debugging output
+
+    query = DeforestationAlert.query
+    
+    if lat and lon:
+        query = query.filter(
+            db.and_(
+                DeforestationAlert.latitude.between(lat - radius / 111, lat + radius / 111),
+                DeforestationAlert.longitude.between(lon - radius / 111, lon + radius / 111)
+            )
+        )
+    
+    alerts = query.filter(
+        DeforestationAlert.alert_date >= datetime.now() - timedelta(days=days)
+    ).order_by(DeforestationAlert.alert_date.desc()).all()
+    
+    if not alerts:
+        return jsonify({
+            "message": "No alerts found in this region."
+        }), 404  # Adjust status code if needed
+    
+    return jsonify({
+        "alerts": [{
+            "id": alert.id,
+            "latitude": alert.latitude,
+            "longitude": alert.longitude,
+            "alert_date": alert.alert_date.isoformat(),
+            "confidence": alert.confidence,
+            "alert_type": alert.alert_type
+        } for alert in alerts]
+    })
+
+
+
+@app.route('/statistics', methods=['GET'])
+def get_statistics():
+    total_trees = Tree.query.count()
+    total_users = User.query.count()
+    recent_alerts = DeforestationAlert.query.filter(
+        DeforestationAlert.alert_date >= datetime.now() - timedelta(days=30)
+    ).count()
+    
+    # Calculate the area affected by deforestation
+    # This is a simplified calculation
+    affected_area = recent_alerts * 0.1  # Assuming each alert represents 0.1 hectares
+    
+    return jsonify({
+        "total_trees_planted": total_trees,
+        "active_users": total_users,
+        "deforestation_alerts_30d": recent_alerts,
+        "affected_area_hectares": round(affected_area, 2)
+    })
+
+# Scheduler setup
+def setup_scheduler():
+    scheduler.add_job(
+        func=lambda: process_gfw_alerts(fetch_gfw_alerts()),
+        trigger="interval",
+        hours=24
+    )
+    scheduler.start()
 
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+        setup_scheduler()
     app.run(debug=True)
